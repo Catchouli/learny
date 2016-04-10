@@ -32,7 +32,8 @@ Executable learny
     time,
     xmlhtml,
     base,
-    lens
+    lens,
+    cond
 
   if flag(development)
     build-depends:

@@ -25,12 +25,6 @@ routes = [ ("/login",    with auth handleLogin)
          ]
 
 
--- The application's slices
---slices :: HasHeist b => [(Text, HeistNoClass.SnapletSplice b v)]
---slices = [
---         ]
-
-
 -- The application snaplet
 app :: SnapletInit App App
 app = makeSnaplet "learny" "Learny description" Nothing $ do

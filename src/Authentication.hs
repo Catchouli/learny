@@ -9,6 +9,7 @@ module Authentication
 where
 
 import Control.Applicative
+import Control.Conditional
 import qualified Data.Text as T
 import Snap.Core
 import Snap.Snaplet
@@ -21,8 +22,9 @@ import Application
 
 -- Render login form
 renderLogin :: Maybe T.Text -> Handler App (AuthManager App) ()
-renderLogin authError = heistLocal (I.bindSplices errs) $ render "login"
+renderLogin authError = ifM isLoggedIn (redirect "/") loginHandler
   where
+    loginHandler = heistLocal (I.bindSplices errs) $ render "login"
     errs = maybe mempty splice authError
     splice err = "loginError" ## I.textSplice err
 

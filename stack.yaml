@@ -5,6 +5,7 @@ extra-package-dbs: []
 packages:
 - '.'
 extra-deps:
+- cond-0.4.1.1
 - resource-pool-catchio-0.2.1.0
 - snap-loader-static-0.9.0.2
 - snap-server-0.9.5.1
