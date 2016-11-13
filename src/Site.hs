@@ -32,6 +32,8 @@ routes = [
 -- The application snaplet
 app :: SnapletInit App App
 app = makeSnaplet "learny" "Learny description" Nothing $ do
+    -- Initialise database
+
     h <- nestSnaplet "" heist $ heistInit "templates"
     d <- nestSnaplet "db" db $ initPersist (runMigrationUnsafe migrateAuth)
     s <- nestSnaplet "sess" sess $
@@ -42,4 +44,3 @@ app = makeSnaplet "learny" "Learny description" Nothing $ do
     addAuthSplices h auth
 
     return $ App h d s a
-

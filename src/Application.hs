@@ -26,3 +26,6 @@ makeLenses ''App
 
 instance HasHeist App where
   heistLens = subSnaplet heist
+
+instance HasPersistPool (Handler b App) where
+  getPersistPool = with db getPersistPool
