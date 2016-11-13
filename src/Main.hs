@@ -41,10 +41,11 @@ main = do
 -- production mode is in use.
 getConf :: IO (Config Snap AppConfig)
 getConf = commandLineAppConfig $ id
-            . setSSLPort 8080
-            . setSSLCert "/etc/letsencrypt/live/dev.learny.click/fullchain.pem"
-            . setSSLKey "/etc/letsencrypt/live/dev.learny.click/privkey.pem"
-            . setSSLChainCert True
+            . setPort 8081
+            -- . setSSLPort 8080
+            -- . setSSLCert "/etc/letsencrypt/live/dev.learny.click/fullchain.pem"
+            -- . setSSLKey "/etc/letsencrypt/live/dev.learny.click/privkey.pem"
+            -- . setSSLChainCert True
             $ mempty
 
 

@@ -1,8 +1,7 @@
 {-# LANGUAGE OverloadedStrings #-}
 
 module Authentication
-  ( renderLogin
-  , handleLogin
+  ( handleLogin
   , handleLogout
   , handleNewUser
   )

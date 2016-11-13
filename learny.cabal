@@ -23,17 +23,20 @@ Executable learny
     heist,
     MonadCatchIO-transformers,
     mtl,
+    transformers,
     snap,
     snap-core,
     snap-server,
     snap-loader-static,
+    postgresql-simple,
     snaplet-postgresql-simple,
     text,
     time,
     xmlhtml,
     base,
     lens,
-    cond
+    cond,
+    mime-mail
 
   if flag(development)
     build-depends:
