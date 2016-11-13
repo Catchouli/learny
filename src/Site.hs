@@ -4,13 +4,15 @@ module Site
   ( app
   ) where
 
+import Control.Lens
 import Data.ByteString (ByteString)
+import Database.Persist.Sql
 import Snap.Snaplet
+import Snap.Snaplet.Persistent
 import Snap.Snaplet.Auth
-import Snap.Snaplet.Auth.Backends.PostgresqlSimple
+import Snap.Snaplet.Auth.Backends.Persistent
 import Snap.Snaplet.Heist
 import Snap.Snaplet.Session.Backends.CookieSession
-import Snap.Snaplet.PostgresqlSimple
 import Snap.Util.FileServe
 import Config
 import Application
@@ -31,10 +33,11 @@ routes = [
 app :: SnapletInit App App
 app = makeSnaplet "learny" "Learny description" Nothing $ do
     h <- nestSnaplet "" heist $ heistInit "templates"
-    d <- nestSnaplet "db" db pgsInit
+    d <- nestSnaplet "db" db $ initPersist (runMigrationUnsafe migrateAuth)
     s <- nestSnaplet "sess" sess $
            initCookieSessionManager siteKeyPath "sess" (Just authExpiry)
-    a <- nestSnaplet "auth" auth $ initPostgresAuth sess d
+    --a <- nestSnaplet "auth" auth $ initPersistAuthManager sess d
+    a <- nestSnaplet "auth" auth $ initPersistAuthManager sess (persistPool $ view snapletValue d)
 
     addRoutes routes
     addAuthSplices h auth
