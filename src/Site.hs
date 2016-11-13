@@ -36,7 +36,6 @@ app = makeSnaplet "learny" "Learny description" Nothing $ do
     d <- nestSnaplet "db" db $ initPersist (runMigrationUnsafe migrateAuth)
     s <- nestSnaplet "sess" sess $
            initCookieSessionManager siteKeyPath "sess" (Just authExpiry)
-    --a <- nestSnaplet "auth" auth $ initPersistAuthManager sess d
     a <- nestSnaplet "auth" auth $ initPersistAuthManager sess (persistPool $ view snapletValue d)
 
     addRoutes routes
