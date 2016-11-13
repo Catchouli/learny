@@ -1,0 +1,8 @@
+.stack-work
+log
+log/access.log
+log/error.log
+site_key.txt
+snaplets/persist
+snaplets/persist-auth
+**.swp
