@@ -1,3 +1,5 @@
+-- don't edit me, this is just to fix a path problem
+-- when using ghci and must be the same as the snaplet-persistent version
 SnapAuthUser
   login Text 
   email Text default=''
