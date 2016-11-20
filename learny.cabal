@@ -36,7 +36,9 @@ Executable learny
     base,
     lens,
     cond,
-    mime-mail
+    mime-mail,
+    esqueleto,
+    string-conversions
 
   if flag(development)
     build-depends:

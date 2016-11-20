@@ -29,3 +29,6 @@ instance HasHeist App where
 
 instance HasPersistPool (Handler b App) where
   getPersistPool = with db getPersistPool
+
+instance HasPersistPool (Handler App (AuthManager App)) where
+    getPersistPool = withTop db getPersistPool

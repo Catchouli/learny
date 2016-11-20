@@ -17,14 +17,19 @@ import Snap.Util.FileServe
 import Config
 import Application
 import Authentication
+import Cards
 
 
 -- The application's routes
 routes :: [(ByteString, Handler App App ())]
-routes = [
+routes = [ -- Authentication
            ("/login",    with auth handleLogin)
          , ("/logout",   with auth handleLogout)
          , ("/new_user", with auth handleNewUser)
+           -- Cards
+         , ("/cards/new", with auth handleNewCard)
+         , ("/cards/list", with auth handleShowCards)
+           -- Static data
          , ("/static",   serveDirectory "static")
          ]
 
@@ -32,10 +37,8 @@ routes = [
 -- The application snaplet
 app :: SnapletInit App App
 app = makeSnaplet "learny" "Learny description" Nothing $ do
-    -- Initialise database
-
     h <- nestSnaplet "" heist $ heistInit "templates"
-    d <- nestSnaplet "db" db $ initPersist (runMigrationUnsafe migrateAuth)
+    d <- nestSnaplet "db" db $ initPersist (mapM_ runMigrationUnsafe [migrateAuth, migrateCards])
     s <- nestSnaplet "sess" sess $
            initCookieSessionManager siteKeyPath "sess" (Just authExpiry)
     a <- nestSnaplet "auth" auth $ initPersistAuthManager sess (persistPool $ view snapletValue d)
