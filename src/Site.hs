@@ -29,6 +29,7 @@ routes = [ -- Authentication
            -- Cards
          , ("/cards/new", with auth handleNewCard)
          , ("/cards/list", with auth handleShowCards)
+         , ("/cards/edit/:id", with auth handleEditCard)
            -- Static data
          , ("/static",   serveDirectory "static")
          ]

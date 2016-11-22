@@ -1,18 +1,18 @@
 <apply template="base">
-  <h1>Add a new card</h1>
+  <h1>Edit card</h1>
 
   <p><error/></p>
 
-  <bind tag="postAction">/cards/new</bind>
+  <bind tag="postAction">/cards/edit</bind>
   <bind tag="submitText">Login</bind>
 
   <form method="post" action="/cards/new">
     <table id="info">
       <tr>
-        <td>Front:</td><td><input type="text" name="front" size="20" /></td>
+        <td>Front:</td><td><input type="text" name="front" size="20" value="${front}" /></td>
       </tr>
       <tr>
-        <td>Back:</td><td><input type="text" name="back" size="20" /></td>
+        <td>Back:</td><td><input type="text" name="back" size="20" value="${back}" /></td>
       </tr>
       <tr>
         <td></td>

@@ -9,14 +9,15 @@
 {-# LANGUAGE TypeFamilies               #-}
 
 module Cards
-  ( handleShowCards
-  , handleNewCard
-  , migrateCards
-  )
+--  ( handleShowCards
+--  , handleNewCard
+--  , migrateCards
+--  )
 where
 
 import Application
 import Util
+import Database.Persist.Sql
 import Database.Persist.TH
 import Control.Monad.IO.Class (MonadIO)
 import Snap.Snaplet.Heist
@@ -30,11 +31,20 @@ import qualified Data.Text as T
 import Database.Persist
 import qualified Database.Esqueleto as E
 import Data.String.Conversions
+import qualified Data.ByteString as BS
+import Data.Int
 
 
 -- | The cards table / structure
 
 share [mkPersist sqlSettings, mkMigrate "migrateCards"] [persistLowerCase|
+UserSrsNote
+  user_id T.Text
+UserSrsNoteFields
+  user_id T.Text
+  note_id Int
+  field_id Int
+  name T.Text
 UserSrsCard
   user_id T.Text
   front T.Text
@@ -47,31 +57,66 @@ UserSrsCard
 -- | A handler that allows the current user to add new cards
 
 handleNewCard :: Handler App (AuthManager App) ()
-handleNewCard = method GET (renderNewCard Nothing) <|> method POST addNewCard
+handleNewCard = method GET (renderNewCard Nothing)
+            <|> method POST addNewCard
   where
-    addNewCard = do
+    renderNewCard err = requireLogin $ renderWithError "new_card" err
+    addNewCard = updateOrCreateCard Nothing Nothing success failure
+    success = renderNewCard (Just "Added new card")
+    failure = renderNewCard (Just "Failed to add card")
+
+
+-- | A handler that allows a card to be edited
+
+handleEditCard :: Handler App (AuthManager App) ()
+handleEditCard = method GET renderEditCard
+             <|> method POST editCard
+  where
+    renderEditCard = requireLogin $ do
       user <- currentUser
       let user_id = user >>= userId
-      front <- getParam "front"
-      back <- getParam "back"
-      let card = UserSrsCard
-                    <$> (unUid <$> user_id)
-                    <*> (cs <$> front)
-                    <*> (cs <$> back)
-                    <*> return 250
-                    <*> return 0
-      maybe (return ()) (runPersist . insertNewCard) card
-      renderNewCard (Just "Added new card")
+      card_id <- getParam "id"
+      let card_key = toSqlKey . read . cs <$> card_id :: Maybe (Key UserSrsCard)
+      let query = (\x y -> selectList [UserSrsCardId ==. x, UserSrsCardUser_id ==. y] []) <$> card_key <*> (unUid <$> user_id)
+      result <- maybe (return []) (\q -> runPersist q) query
+      let card = Just $ head $ map E.entityVal result
+      let card = case map E.entityVal result of
+                    a:_ -> Just a
+                    [] -> Nothing
+      let user = userSrsCardUser_id <$> card
+      let splices = mconcat [ ("front" ##) . I.textSplice . userSrsCardFront <$> card
+                            , ("back" ##) . I.textSplice . userSrsCardBack <$> card
+                            ]
+      maybe (renderWithError "new_card" (Just "Failed to find specified card"))
+            (\s -> heistLocal (I.bindSplices s) (render "edit_card"))
+            splices
+    -- commented version will currently create the card as new due to nothing/nothing
+    -- needs to be updated to update the card, but only if it belongs to the right user
+    editCard = return ()--updateOrCreateCard Nothing Nothing success failure
+    success = renderWithError "edit_card" (Just "Card successfully updated")
+    failure = renderWithError "new_card" (Just "Failed to update card")
 
 
--- | Renders the new card page with an optional error
+-- | Updates or creates a card from the given parameters
 
-renderNewCard :: Maybe T.Text -> Handler App (AuthManager App) ()
-renderNewCard newCardError = requireLogin $ newCardView
-  where
-    newCardView = heistLocal (I.bindSplices errs) $ render "new_card"
-    errs = maybe mempty splice newCardError
-    splice err = "newCardError" ## I.textSplice err
+updateOrCreateCard :: Maybe (Key UserSrsCard)
+                   -> Maybe UserSrsCard
+                   -> Handler App (AuthManager App) ()
+                   -> Handler App (AuthManager App) ()
+                   -> Handler App (AuthManager App) ()
+updateOrCreateCard existingKey existingCard success failure = do
+  card <- do
+    user <- currentUser
+    let user_id = user >>= userId
+    front <- getParam "front"
+    back <- getParam "back"
+    return $ UserSrsCard
+               <$> (unUid <$> user_id)
+               <*> (cs <$> front)
+               <*> (cs <$> back)
+               <*> return 250
+               <*> return 0
+  maybe (failure) (\x -> (runPersist . insertOrUpdateCard existingKey $ x) >> success) card
 
 
 -- | A handler that shows the current user's cards
@@ -91,8 +136,8 @@ handleShowCards = requireLogin $ do
 
 -- | Add a new card to the database
 
-insertNewCard :: MonadIO m => UserSrsCard -> E.SqlPersistT m ()
-insertNewCard card = insert card >> return ()
+insertOrUpdateCard :: MonadIO m => Maybe (Key UserSrsCard) -> UserSrsCard -> E.SqlPersistT m (Key UserSrsCard)
+insertOrUpdateCard key card = maybe (insert card) (\k -> replace k card >> return k) key
 
 
 -- | Selects the given user's cards
@@ -103,6 +148,5 @@ selectUserCards user_id = do
     E.select $
     E.from $ \card -> do
       E.where_ (card E.^. UserSrsCardUser_id E.==. E.val (unUid user_id))
-      E.limit 3
       return card
   return $ E.entityVal <$> cards
