@@ -38,6 +38,8 @@ Executable learny
     cond,
     mime-mail,
     esqueleto,
+    either,
+    safe,
     string-conversions
 
   if flag(development)

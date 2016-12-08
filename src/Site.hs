@@ -26,10 +26,28 @@ routes = [ -- Authentication
            ("/login",    with auth handleLogin)
          , ("/logout",   with auth handleLogout)
          , ("/new_user", with auth handleNewUser)
-           -- Cards
-         , ("/cards/new", with auth handleNewCard)
-         , ("/cards/list", with auth handleShowCards)
-         , ("/cards/edit/:id", with auth handleEditCard)
+           -- Decks
+         , ("/review", with auth handleReviewDeck)
+         , ("/review/:id", with auth handleReviewDeck)
+         , ("/decks/new", with auth handleNewDeck)
+         , ("/decks/list", with auth (handleListDecks Nothing))
+         , ("/decks/edit/:id", with auth handleEditDeck)
+         , ("/decks/remove/:id", with auth handleRemoveDeck)
+           -- Facts
+         , ("/facts/new", with auth handleNewFact)
+         , ("/facts/list", with auth handleListFacts)
+         , ("/facts/edit/:id", with auth handleEditFact)
+         , ("/facts/remove/:id", with auth handleRemoveFact)
+           -- Fact types
+         , ("/fact_types/new", with auth handleNewFactType)
+         , ("/fact_types/list", with auth handleListFactTypes)
+         , ("/fact_types/edit/:id", with auth handleEditFactType)
+         , ("/fact_types/remove/:id", with auth handleRemoveFactType)
+           -- Card types
+         , ("/fact_types/:fact_type_id/card_types/new", with auth handleNewCardType)
+         , ("/fact_types/:fact_type_id/card_types/list", with auth handleListCardTypes)
+         , ("/fact_types/:fact_type_id/card_types/edit/:id", with auth handleEditCardType)
+         , ("/fact_types/:fact_type_id/card_types/remove/:id", with auth handleRemoveCardType)
            -- Static data
          , ("/static",   serveDirectory "static")
          ]

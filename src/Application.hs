@@ -14,6 +14,7 @@ import Snap.Snaplet.Heist
 import Snap.Snaplet.Auth
 import Snap.Snaplet.Session
 import Snap.Snaplet.Persistent
+import Control.Monad.Trans.Either
 
 data App = App
     { _heist   :: Snaplet (Heist App)
