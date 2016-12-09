@@ -40,7 +40,8 @@ Executable learny
     esqueleto,
     either,
     safe,
-    string-conversions
+    string-conversions,
+    containers
 
   if flag(development)
     build-depends:

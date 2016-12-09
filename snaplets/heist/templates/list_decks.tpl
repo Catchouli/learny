@@ -8,7 +8,8 @@
   <ul>
     <decks>
       <li>
-        <a href="/decks/edit/${id}"><name/></a>
+        <name/>
+        (<a href="/decks/edit/${id}">edit</a>)
         (<a href="/decks/remove/${id}">delete</a>)
       </li>
       <hr>
