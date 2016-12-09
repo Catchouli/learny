@@ -43,11 +43,11 @@ routes = [ -- Authentication
          , ("/fact_types/list", with auth (handleListFactTypes Nothing))
          , ("/fact_types/edit/:id", with auth handleEditFactType)
          , ("/fact_types/remove/:id", with auth handleRemoveFactType)
+         -- Fields
          , ("/fact_types/:fact_type_id/fields/new", with auth handleNewFactTypeField)
          , ("/fact_types/:fact_type_id/fields/remove/:field_id", with auth handleRemoveFactTypeField)
            -- Card types
          , ("/fact_types/:fact_type_id/card_types/new", with auth handleNewCardType)
-         , ("/fact_types/:fact_type_id/card_types/list", with auth handleListCardTypes)
          , ("/fact_types/:fact_type_id/card_types/edit/:id", with auth handleEditCardType)
          , ("/fact_types/:fact_type_id/card_types/remove/:id", with auth handleRemoveCardType)
            -- Static data

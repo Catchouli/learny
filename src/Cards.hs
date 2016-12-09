@@ -114,15 +114,12 @@ UserSrsDeck
 
 -- Handlers --
 
-renderTemporary :: MonadSnap m => [Char] -> m ()
+renderTemporary :: HasHeist m => [Char] -> Handler m v ()
 renderTemporary string = do params <- getParams
+                            render "base"
                             writeBS . BS.pack $ "handler: " ++ string ++ " params: " ++ show params
 
 -- Decks
-
-currentUserId :: Handler App (AuthManager App) (Maybe SnapAuthUserId)
-currentUserId = do user <- currentUser
-                   return $ user >>= userDBKey
 
 handleReviewDeck :: Handler App (AuthManager App) ()
 handleReviewDeck = method GET (renderTemporary "review_deck")
@@ -437,9 +434,6 @@ handleRemoveFactType = method GET showDeleteForm
 handleNewCardType :: Handler App (AuthManager App) ()
 handleNewCardType = method GET (renderTemporary "new_card_type")
 
-handleListCardTypes :: Handler App (AuthManager App) ()
-handleListCardTypes = method GET (renderTemporary "list_card_types")
-
 handleEditCardType :: Handler App (AuthManager App) ()
 handleEditCardType = method GET (renderTemporary "edit_card_type")
 
@@ -447,6 +441,10 @@ handleRemoveCardType :: Handler App (AuthManager App) ()
 handleRemoveCardType = method GET (renderTemporary "remove_card_type")
 
 -- Other
+
+currentUserId :: Handler App (AuthManager App) (Maybe SnapAuthUserId)
+currentUserId = do user <- currentUser
+                   return $ user >>= userDBKey
 
 -- Turns 'message' into a splice based on whether it's empty (no message),
 -- or whether it contans an error (left) or a success message (right)
