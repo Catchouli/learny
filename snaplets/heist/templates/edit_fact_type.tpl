@@ -41,12 +41,29 @@
           </fields>
         </ul>
       </li>
+      <li>Card types:</li>
+      <li>
+        <ul>
+          <card_types>
+            <li>
+              <input type="text" name="card-type-name-${card_type_id}" value="${name}" />
+              <a href="/fact_types/${id}/card_types/remove/${card_type_id}">Remove</a>
+            </li>
+          </card_types>
+        </ul>
+      </li>
       <li><input type="submit" /></li>
     </ul>
   </form>
   <form method="post" action="/fact_types/${id}/fields/new" class="inline">
     <button type="submit" class="link-button">
       New field
+    </button>
+  </form>
+  <br>
+  <form method="post" action="/fact_types/${id}/card_types/new" class="inline">
+    <button type="submit" class="link-button">
+      New card type
     </button>
   </form>
 </apply>

@@ -9,34 +9,65 @@
 {-# LANGUAGE TypeFamilies               #-}
 
 module Cards
---  ( handleShowCards
---  , handleNewCard
---  , migrateCards
---  )
+-- Decks
+( handleReviewDeck
+, handleNewDeck
+, handleListDecks
+, handleEditDeck
+, handleRemoveDeck
+-- Facts
+, handleNewFact
+, handleListFacts
+, handleEditFact
+, handleRemoveFact
+-- Fact types
+, handleNewFactType
+, handleListFactTypes
+, handleEditFactType
+, handleRemoveFactType
+-- Fields
+, handleNewFactTypeField
+, handleRemoveFactTypeField
+-- Card types
+, handleNewCardType
+, handleEditCardType
+, handleRemoveCardType
+-- Data
+, migrateCards
+)
 where
 
-import Safe
-import Application
-import Util
-import Database.Persist.Sql
-import Database.Persist.TH
-import Snap.Snaplet.Heist
-import Snap.Snaplet.Auth
-import Heist
-import Snap
-import Snap.Snaplet.Persistent
-import Control.Applicative
-import Control.Category ((>>>))
-import Data.String.Conversions
-import Snap.Snaplet.Auth.Backends.Persistent
-import Control.Monad.Trans
-import Control.Monad.Trans.Either
-import Data.String
-import Data.List (find)
-import qualified Data.Map as M
-import qualified Heist.Interpreted as I
-import qualified Data.Text as T
-import qualified Data.ByteString.Char8 as BS
+import Safe                                  ( headMay )
+import Application                           ( App )
+import Util                                  ( require, requireLogin
+                                             , renderWithErrors, messageSplice
+                                             , maybeToEitherT, messageSpliceE )
+import Database.Persist.Sql                  ( selectList, count, toSqlKey
+                                             , fromSqlKey, insert, delete, update
+                                             , Entity(..), SelectOpt(LimitTo)
+                                             , (==.), (=.), (<-.) )
+import Database.Persist.TH                   ( share, mkPersist, sqlSettings
+                                             , mkMigrate, persistLowerCase )
+import Snap.Snaplet.Heist                    ( render, heistLocal, HasHeist )
+import Snap.Snaplet.Auth                     ( AuthManager, currentUser )
+import Heist                                 ( (##), MapSyntax, HeistT, Template )
+import Snap                                  ( getParam, getParams, writeBS
+                                             , redirect, method, Handler
+                                             , Method(..) )
+import Control.Applicative                   ( (<|>) )
+import Control.Category                      ( (>>>) )
+import Data.String                           ( IsString )
+import Data.List                             ( find )
+import Control.Monad.Trans                   ( lift )
+import Control.Monad.Trans.Either            ( runEitherT, EitherT )
+import Data.String.Conversions               ( cs )
+import Snap.Snaplet.Persistent               ( runPersist )
+import Snap.Snaplet.Auth.Backends.Persistent ( SnapAuthUserId, userDBKey )
+import qualified Data.Map as M               ( toList, filterWithKey )
+import qualified Heist.Interpreted as I      ( bindSplice, bindSplices, textSplice
+                                             , mapSplices, runChildrenWith )
+import qualified Data.Text as T              ( Text, pack )
+import qualified Data.ByteString.Char8 as BS ( pack, unpack, take )
 
 
 -- | The cards table / structure
@@ -290,21 +321,29 @@ handleEditFactType = method GET (showForm Nothing) <|> method POST updateFactTyp
         fields <- lift . runPersist $ selectList [ UserSrsFactFieldUser_id ==. user
                                                  , UserSrsFactFieldFact_type_id ==. ftId
                                                  ] []
-        return (factType, fields)
+        card_types <- lift . runPersist $ selectList [ UserSrsCardTypeUser_id ==. user
+                                                     , UserSrsCardTypeFact_type_id ==. ftId
+                                                     ] []
+        return (factType, fields, card_types)
       case factType of
            Left err -> handleListFactTypes (Just . Left $ err)
            Right res -> heistLocal (formSplices res formError) (render "edit_fact_type")
     -- Builds splices for the edit form using a fact type record and an optional error or success message
-    formSplices ((Entity factTypeId factType), fields) formError =
+    formSplices ((Entity factTypeId factType), fields, cardTypes) formError =
             I.bindSplices . mconcat $
               ["name" ## I.textSplice . userSrsFactTypeName $ factType
               , "id" ## I.textSplice . cs . show . fromSqlKey $ factTypeId
               , maybe mempty (messageSpliceE) (formError)
               , "fields" ## I.mapSplices (I.runChildrenWith . spliceFromField) fields
+              , "card_types" ## I.mapSplices (I.runChildrenWith . spliceFromCardType) cardTypes
               ]
     spliceFromField (Entity fieldId field) =
             mconcat [ "field_id" ## I.textSplice (cs . show . fromSqlKey $ fieldId)
                     , "name" ## I.textSplice (cs . userSrsFactFieldName $ field)
+                    ]
+    spliceFromCardType (Entity cardTypeId cardType) =
+            mconcat [ "card_type_id" ## I.textSplice (cs . show . fromSqlKey $ cardTypeId)
+                    , "name" ## I.textSplice (cs . userSrsCardTypeName $ cardType)
                     ]
 
     -- Updates a fact type
@@ -323,8 +362,10 @@ handleEditFactType = method GET (showForm Nothing) <|> method POST updateFactTyp
              lift . runPersist $ update factTypeId [UserSrsFactTypeName =. cs newName]
           Nothing -> return ()
 
-        -- Update field names if specified
+        -- Update field and card type names
         allParams <- lift getParams 
+
+        -- Update field names if specified
         -- Filter parameters to get field names (parameters beginning with "field-name-"
         let newFieldNames = map (\(a,b) -> (drop 11 $ BS.unpack a, BS.unpack . head $ b)) $
                 M.toList . M.filterWithKey (\k _ -> BS.take 11 k == "field-name-") $ allParams
@@ -339,6 +380,23 @@ handleEditFactType = method GET (showForm Nothing) <|> method POST updateFactTyp
             case maybeNewName of
               Just (_, newName) -> do
                 lift . runPersist $ update fieldId [UserSrsFactFieldName =. cs newName]
+              Nothing -> return ()
+
+        -- Update card type names if specified
+        -- Filter parameters to get field names (parameters beginning with "card-type-name-"
+        let newCardTypeNames = map (\(a,b) -> (drop 15 $ BS.unpack a, BS.unpack . head $ b)) $
+                M.toList . M.filterWithKey (\k _ -> BS.take 15 k == "card-type-name-") $ allParams
+        -- Find these card types in the database
+        card_types <- lift . runPersist $
+          selectList [ UserSrsCardTypeUser_id ==. user
+                     , UserSrsCardTypeId <-. (map (toSqlKey . read . fst) newCardTypeNames)] []
+        -- For each card type returned, update its name
+        (flip mapM_) card_types $ \(Entity cardTypeId _) ->
+          do
+            let maybeNewName = find (\(x,_) -> (toSqlKey . read) x == cardTypeId) newCardTypeNames
+            case maybeNewName of
+              Just (_, newName) -> do
+                lift . runPersist $ update cardTypeId [UserSrsCardTypeName =. cs newName]
               Nothing -> return ()
 
       case result of
@@ -387,7 +445,7 @@ handleRemoveFactTypeField = method GET showDeleteForm
       result <- runEitherT $ do
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
-        factFieldIdTxt <- getParamE "field_id" "No fact type id specified."
+        factFieldIdTxt <- getParamE "field_id" "No fact field id specified."
         Entity factFieldId factField <- getUserFactField user (toSqlKey . read . cs $ factFieldIdTxt)
         let factFieldName = userSrsFactFieldName factField
         lift . runPersist $ delete factFieldId
@@ -432,13 +490,57 @@ handleRemoveFactType = method GET showDeleteForm
 -- Card types
 
 handleNewCardType :: Handler App (AuthManager App) ()
-handleNewCardType = method GET (renderTemporary "new_card_type")
+handleNewCardType = method POST addCardType
+  where
+    addCardType = do
+      result <- runEitherT $ do
+        user <- currentUserIdE
+        factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
+        Entity factTypeId _ <- getUserFactType user (toSqlKey . read . cs $ factTypeIdTxt)
+        cardTypeCount <- lift . runPersist $ count [UserSrsCardTypeFact_type_id ==. factTypeId]
+        lift . runPersist $
+          insert $ UserSrsCardType user factTypeId (cs $ "Card type " ++ show (cardTypeCount+1)) "${front}" "${back}"
+        return factTypeIdTxt
+      case result of
+        Left err -> handleListFactTypes (Just . Left $ err)
+        Right factTypeId -> redirect . cs $ "/fact_types/edit/" ++ factTypeId
 
 handleEditCardType :: Handler App (AuthManager App) ()
 handleEditCardType = method GET (renderTemporary "edit_card_type")
 
 handleRemoveCardType :: Handler App (AuthManager App) ()
-handleRemoveCardType = method GET (renderTemporary "remove_card_type")
+handleRemoveCardType = method GET showDeleteForm
+                   <|> method POST deleteCardType
+  where
+    -- Shows the form for deletion, passing the name and id to the page to verify with the user
+    showDeleteForm = do
+      result <- runEitherT $ do
+        user <- currentUserIdE
+        cardTypeStr <- getParamE "id" "No card type id specified."
+        Entity cardTypeKey cardType <- getUserCardType user (toSqlKey . read . cs $ cardTypeStr)
+        let cardTypeName = userSrsCardTypeName cardType
+        let cardTypeId = fromSqlKey cardTypeKey
+        return (cardTypeId, cardTypeName)
+      case result of
+           Left err                  -> handleListFactTypes (Just . Left $ err)
+           Right (cardTypeId, name)  -> heistLocal (I.bindSplices . mconcat $
+                                          [ "name" ## I.textSplice name
+                                          , "id" ## I.textSplice . cs . show $ cardTypeId
+                                          ])
+                                        (render "delete_card_type")
+    -- Actually deletes the card type field
+    deleteCardType = do
+      result <- runEitherT $ do
+        user <- currentUserIdE
+        factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
+        cardTypeIdTxt <- getParamE "id" "No card type id specified."
+        Entity cardTypeId cardType <- getUserCardType user (toSqlKey . read . cs $ cardTypeIdTxt)
+        let cardTypeName = userSrsCardTypeName cardType
+        lift . runPersist $ delete cardTypeId
+        return $ (cardTypeName, factTypeIdTxt)
+      case result of
+           Left err          -> handleListFactTypes (Just . Left $ err)
+           Right (_, typeId) -> redirect . cs $ "/fact_types/edit/" ++ typeId
 
 -- Other
 
@@ -484,6 +586,14 @@ getUserFactField :: SnapAuthUserId
                 -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsFactField)
 getUserFactField user deckId = (lift . runPersist $ selectList [UserSrsFactFieldUser_id ==. user,
                                                                 UserSrsFactFieldId ==. deckId]
+                                                               [LimitTo 1])
+                              >>= (headMay >>> maybeToEitherT "No such fact field found.")
+
+getUserCardType :: SnapAuthUserId
+                -> UserSrsCardTypeId
+                -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsCardType)
+getUserCardType user deckId = (lift . runPersist $ selectList [UserSrsCardTypeUser_id ==. user,
+                                                                UserSrsCardTypeId ==. deckId]
                                                                [LimitTo 1])
                               >>= (headMay >>> maybeToEitherT "No such fact field found.")
 
