@@ -33,6 +33,8 @@ Executable learny
     text,
     time,
     xmlhtml,
+    monad-logger,
+    resourcet,
     base,
     lens,
     cond,

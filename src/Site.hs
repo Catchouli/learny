@@ -17,7 +17,7 @@ import Snap.Util.FileServe
 import Config
 import Application
 import Authentication
-import Cards
+import SpacedRepetition
 
 
 -- The application's routes

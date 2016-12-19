@@ -17,6 +17,8 @@ import Snap.Snaplet.Heist
 import Heist
 import qualified Heist.Interpreted as I
 import Application
+import SpacedRepetition (registerUserCollection)
+import Util
 
 
 -- Render login form
@@ -33,8 +35,17 @@ handleLogin :: Handler App (AuthManager App) ()
 handleLogin = method GET (renderLogin Nothing) <|> method POST withErr
   where
     withErr = loginUser "login" "password" Nothing
-                        (\_ -> renderLogin err) (redirect "/")
+                        (\_ -> renderLogin err) (handleFirstLogin >> redirect "/")
     err = Just "Unknown user or password"
+    -- | Checks if this is the user's first login, and runs some actions if so
+    -- (Otherwise, do nothing)
+    handleFirstLogin = do
+      maybeUser <- currentUser
+      case maybeUser >>= return . userLoginCount of
+        Just loginCount -> case loginCount of 0 -> firstLoginActions; _ -> return ()
+        Nothing -> logError "Fatal error (unexpected): no currentUser on login?"
+    -- | Actions to run on first login
+    firstLoginActions = registerUserCollection
 
 
 -- Handle log outs
@@ -47,4 +58,8 @@ handleNewUser :: Handler App (AuthManager App) ()
 handleNewUser = method GET handleForm <|> method POST handleFormSubmit
   where
     handleForm = render "new_user"
-    handleFormSubmit = registerUser "login" "password" >> redirect "/"
+    handleFormSubmit = do
+      res <- registerUser "login" "password"
+      case res of
+           Left _     -> renderWithErrors "new_user" ["Registration failed"]
+           Right _    -> redirect "/"

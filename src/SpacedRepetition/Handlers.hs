@@ -1,14 +1,6 @@
-{-# LANGUAGE EmptyDataDecls             #-}
-{-# LANGUAGE FlexibleContexts           #-}
-{-# LANGUAGE GADTs                      #-}
-{-# LANGUAGE GeneralizedNewtypeDeriving #-}
-{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE OverloadedStrings          #-}
-{-# LANGUAGE QuasiQuotes                #-}
-{-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE TypeFamilies               #-}
 
-module Cards
+module SpacedRepetition.Handlers
 -- Decks
 ( handleReviewDeck
 , handleNewDeck
@@ -32,123 +24,37 @@ module Cards
 , handleNewCardType
 , handleEditCardType
 , handleRemoveCardType
--- Data
-, migrateCards
 )
 where
 
-import Safe                                  ( headMay )
+import SpacedRepetition.Cards
 import Application                           ( App )
-import Util                                  ( require, requireLogin
-                                             , renderWithErrors, messageSplice
-                                             , maybeToEitherT, messageSpliceE )
-import Database.Persist.Sql                  ( selectList, count, toSqlKey
-                                             , fromSqlKey, insert, delete, update
-                                             , Entity(..), SelectOpt(LimitTo)
-                                             , (==.), (=.), (<-.) )
-import Database.Persist.TH                   ( share, mkPersist, sqlSettings
-                                             , mkMigrate, persistLowerCase )
+import Util                                  ( requireLogin, renderWithErrors
+                                             , messageSpliceE, currentUserIdE
+                                             , getParamE, messageSplices )
+import Database.Persist.Sql                  ( Entity(..), fromSqlKey, toSqlKey )
 import Snap.Snaplet.Heist                    ( render, heistLocal, HasHeist )
-import Snap.Snaplet.Auth                     ( AuthManager, currentUser )
-import Heist                                 ( (##), MapSyntax, HeistT, Template )
+import Snap.Snaplet.Auth                     ( AuthManager )
+import Heist                                 ( (##) )
 import Snap                                  ( getParam, getParams, writeBS
                                              , redirect, method, Handler
                                              , Method(..) )
 import Control.Applicative                   ( (<|>) )
-import Control.Category                      ( (>>>) )
-import Data.String                           ( IsString )
-import Data.List                             ( find )
 import Control.Monad.Trans                   ( lift )
-import Control.Monad.Trans.Either            ( runEitherT, EitherT )
+import Control.Monad.Trans.Either            ( runEitherT )
 import Data.String.Conversions               ( cs )
-import Snap.Snaplet.Persistent               ( runPersist )
-import Snap.Snaplet.Auth.Backends.Persistent ( SnapAuthUserId, userDBKey )
 import qualified Data.Map as M               ( toList, filterWithKey )
-import qualified Heist.Interpreted as I      ( bindSplice, bindSplices, textSplice
+import qualified Heist.Interpreted as I      ( bindSplices, textSplice
                                              , mapSplices, runChildrenWith )
-import qualified Data.Text as T              ( Text, pack )
+import qualified Data.Text as T              ( pack )
 import qualified Data.ByteString.Char8 as BS ( pack, unpack, take )
 
-
--- | The cards table / structure
--- | The following user-defined types are controlled here:
--- |
--- | Fact types:
--- |   Facts are generic containers of data.
--- |   Each fact type has 0 or more String fields.
--- |   Fact types can be edited to add more fields, modify the names of existing fields, or remove existing fields.
--- |   For example: Fact type Basic (front, back), meaning two text fields, "front" and "back"
--- |                Fact type Car (Make, Model, Year)
--- |
--- | Card types:
--- |   Card types are per-fact type, and specify a card format using the fields of their fact type.
--- |   The data on the front and back of the card is specified as a template, using the data stored in
--- |   the fact type. This way, multiple sets of cards can be automatically generated for a given set of facts.
--- |   For example: Card type Basic (front: "${front}", back: "${back}") meaning the front of the card shoud
--- |                contain only the 'front' field, and the back the 'back' field
--- |                Card type Year (front: "${make} - ${model}", back: "{year}") for learning the year
--- |
--- | Fact:
--- |   A fact is a set of textual strings linked to a field of a user-defined fact type.
--- |   Belongs to a deck.
--- |   When a fact is created, a card for each of the card types linked to its specified fact type is created.
--- |   This can not be handled at the database level so should be handled manually at the application level.
--- |
--- | Card:
--- |   A card is a combination of a fact type and a card type, and reprisents a front:back pair to be learned.
--- |   It should contain nothing except linking a card type and a fact type to some scheduling information.
--- |   A card is automatically created at the following times (this should be handled by application logic):
--- |   When a fact is created
--- |   When a new card type is created for a fact type
--- |   Should be destroyed when a card type is destroyed (warn the user)
--- |
--- | Deck:
--- |   A collection of cards. Has a parent, which is null if the deck is one of the root nodes of the tree.
-
-share [mkPersist sqlSettings, mkMigrate "migrateCards"] [persistLowerCase|
-UserSrsFactType
-  user_id SnapAuthUserId
-  name T.Text
-  UserFactTypeName user_id name
-UserSrsFactField
-  user_id SnapAuthUserId
-  fact_type_id UserSrsFactTypeId
-  name T.Text
-  FactTypeField fact_type_id name
-UserSrsCardType
-  user_id SnapAuthUserId
-  fact_type_id UserSrsFactTypeId
-  name T.Text
-  front_template T.Text
-  back_template T.Text
-  FactCardType fact_type_id name
-UserSrsFact
-  user_id SnapAuthUserId
-UserSrsFactData
-  user_id SnapAuthUserId
-  fact_id UserSrsFactId
-  fact_field_id UserSrsFactFieldId
-  data T.Text
-  FactDataField fact_field_id fact_id
--- | Todo: scheduling info (maybe opaque serialized safecopy data to allow application defined data to be stored)
-UserSrsCard
-  user_id SnapAuthUserId
-  fact_type_id UserSrsFactTypeId
-  card_type_id UserSrsCardTypeId
-  FactCard fact_type_id card_type_id
-UserSrsDeck
-  user_id SnapAuthUserId
-  name T.Text
-  UserDeck user_id name
-|]
-
-
--- Handlers --
 
 renderTemporary :: HasHeist m => [Char] -> Handler m v ()
 renderTemporary string = do params <- getParams
                             render "base"
                             writeBS . BS.pack $ "handler: " ++ string ++ " params: " ++ show params
+
 
 -- Decks
 
@@ -163,9 +69,7 @@ handleNewDeck = method GET (render "new_deck") <|> method POST addDeck
       result <- runEitherT $ do
         user <- currentUserIdE
         deckName <- getParamE "name" "No deck name specified."
-        validateDeckName deckName
-        let newDeck = UserSrsDeck user (cs deckName)
-        lift . runPersist . insert $ newDeck
+        createDeck user (T.pack deckName)
       case result of
            Left err -> renderWithErrors "new_deck" [T.pack err]
            Right _  -> handleListDecks (Just . Right $ "Successfully created deck.")
@@ -175,14 +79,10 @@ handleListDecks message = requireLogin $ listDecks
   where
     -- Lists the current user's decks
     listDecks = do
-      d <- getUsersDecks
-      case d of
+      decksE <- runEitherT $ currentUserIdE >>= getUserDecks
+      case decksE of
            Left err -> renderWithErrors "list_decks" [T.pack err]
            Right decks -> heistLocal (splices decks) (render "list_decks")
-    -- Gets the current user's decks
-    getUsersDecks = runEitherT $ do
-      user <- currentUserIdE
-      lift . runPersist $ selectList [UserSrsDeckUser_id ==. user] []
     -- Builds the splices for listing decks
     splices decks = I.bindSplices . mconcat $ [spliceDeck decks, messageSplices message]
     spliceDeck d = "decks" ## I.mapSplices (I.runChildrenWith . spliceFromDeck) d
@@ -216,15 +116,15 @@ handleEditDeck = method GET (showForm Nothing) <|> method POST updateDeck
         deckIdTxt <- getParamE "id" "No deck id specified."
         newDeckName <- getParamE "name" "No deck name specified."
         Entity deckId _ <- getUserDeck user (toSqlKey . read . cs $ deckIdTxt)
-        validateDeckName . cs $ newDeckName
-        lift . runPersist $ update deckId [UserSrsDeckName =. cs newDeckName]
+        -- Update the deck name
+        updateDeckName user deckId (cs newDeckName)
       case result of
            Left err -> showForm (Just . Left $ err)
            Right () -> showForm (Just . Right $ "Deck updated successfully.")
 
 handleRemoveDeck :: Handler App (AuthManager App) ()
 handleRemoveDeck = method GET showDeleteForm
-               <|> method POST deleteDeck
+               <|> method POST actuallyDeleteDeck
   where
     -- Shows the form for deletion, passing the name and id to the page to verify with the user
     showDeleteForm = do
@@ -243,13 +143,14 @@ handleRemoveDeck = method GET showDeleteForm
                                       ])
                                     (render "delete_deck")
     -- Actually deletes the deck
-    deleteDeck = do
+    actuallyDeleteDeck = do
       result <- runEitherT $ do
         user <- currentUserIdE
         deckIdTxt <- getParamE "id" "No deck id specified."
         Entity deckId deck <- getUserDeck user (toSqlKey . read . cs $ deckIdTxt)
         let deckName = userSrsDeckName deck
-        lift . runPersist $ delete deckId
+        -- Delete the deck
+        deleteDeck user deckId
         return . cs $ deckName
       case result of
            Left err   -> handleListDecks (Just . Left $ err)
@@ -279,15 +180,12 @@ handleNewFactType = method GET (render "new_fact_type") <|> method POST addFactT
       result <- runEitherT $ do
         -- Get parameters
         user <- currentUserIdE
-        name <- getParamE "name" "No name specified."
-        validateFactTypeName name
-        -- Create fact type
-        let newFactType = UserSrsFactType user (cs name)
-        newFactTypeId <- lift . runPersist $ insert newFactType
-        -- Create default fields
-        let field = UserSrsFactField user newFactTypeId
-        let newFactTypeFields = [field "Front", field "Back"]
-        lift . runPersist $ mapM_ insert newFactTypeFields
+        name <- getParamE "name" "No name specified." >>= return . cs
+        -- Create fact type, fields, and a default card type
+        factTypeId <- createFactType user name
+        createFactField user factTypeId "Front"
+        createFactField user factTypeId "Back"
+        createCardType user factTypeId "Default"
       case result of
            Left err -> renderWithErrors "new_fact_type" [T.pack err]
            Right _  -> handleListFactTypes (Just . Right $ "Successfully created fact type.")
@@ -297,10 +195,8 @@ handleListFactTypes message = requireLogin $ listFactTypes
   where
     -- Lists the current user's fact types
     listFactTypes = do
-      d <- runEitherT $ do
-        user <- currentUserIdE
-        lift . runPersist $ selectList [UserSrsFactTypeUser_id ==. user] []
-      case d of
+      factTypesE <- runEitherT $ currentUserIdE >>= getUserFactTypes
+      case factTypesE of
            Left err -> renderWithErrors "list_fact_types" [T.pack err]
            Right factTypes -> heistLocal (splices factTypes) (render "list_fact_types")
     splices factTypes = I.bindSplices . mconcat $ [spliceFactTypes factTypes, messageSplices message]
@@ -318,12 +214,8 @@ handleEditFactType = method GET (showForm Nothing) <|> method POST updateFactTyp
         user <- currentUserIdE
         factId <- getParamE "id" "No fact id specified"
         factType@(Entity ftId _) <- getUserFactType user (toSqlKey . read . cs $ factId)
-        fields <- lift . runPersist $ selectList [ UserSrsFactFieldUser_id ==. user
-                                                 , UserSrsFactFieldFact_type_id ==. ftId
-                                                 ] []
-        card_types <- lift . runPersist $ selectList [ UserSrsCardTypeUser_id ==. user
-                                                     , UserSrsCardTypeFact_type_id ==. ftId
-                                                     ] []
+        fields <- getUserFactFields user ftId
+        card_types <- getUserCardTypes user ftId
         return (factType, fields, card_types)
       case factType of
            Left err -> handleListFactTypes (Just . Left $ err)
@@ -355,49 +247,35 @@ handleEditFactType = method GET (showForm Nothing) <|> method POST updateFactTyp
         -- Update name if specified
         newFactTypeName <- lift . getParam $ "name"
         case newFactTypeName of
-          Just newName ->
-            do
-             Entity factTypeId _ <- getUserFactType user (toSqlKey . read . cs $ factTypeIdTxt)
-             validateFactTypeName . cs $ newName
-             lift . runPersist $ update factTypeId [UserSrsFactTypeName =. cs newName]
-          Nothing -> return ()
+          Just newName -> let factTypeId = toSqlKey . read . cs $ factTypeIdTxt
+                          in updateFactTypeName user factTypeId (cs newName)
+          Nothing      -> return ()
 
         -- Update field and card type names
+        -- Start by getting all the parameters and check them for field and card type names
         allParams <- lift getParams 
 
         -- Update field names if specified
         -- Filter parameters to get field names (parameters beginning with "field-name-"
         let newFieldNames = map (\(a,b) -> (drop 11 $ BS.unpack a, BS.unpack . head $ b)) $
                 M.toList . M.filterWithKey (\k _ -> BS.take 11 k == "field-name-") $ allParams
-        -- Find these fields in the database
-        fields <- lift . runPersist $
-          selectList [ UserSrsFactFieldUser_id ==. user
-                     , UserSrsFactFieldId <-. (map (toSqlKey . read . fst) newFieldNames)] []
         -- For each field returned, update its name
-        (flip mapM_) fields $ \(Entity fieldId _) ->
+        (flip mapM_) newFieldNames $ \(factFieldId, newName) ->
           do
-            let maybeNewName = find (\(x,_) -> (toSqlKey . read) x == fieldId) newFieldNames
-            case maybeNewName of
-              Just (_, newName) -> do
-                lift . runPersist $ update fieldId [UserSrsFactFieldName =. cs newName]
-              Nothing -> return ()
+            let fieldId = toSqlKey . read $ factFieldId
+            _ <- getUserFactField user fieldId
+            updateFactFieldName user fieldId (cs newName)
 
         -- Update card type names if specified
         -- Filter parameters to get field names (parameters beginning with "card-type-name-"
         let newCardTypeNames = map (\(a,b) -> (drop 15 $ BS.unpack a, BS.unpack . head $ b)) $
                 M.toList . M.filterWithKey (\k _ -> BS.take 15 k == "card-type-name-") $ allParams
-        -- Find these card types in the database
-        card_types <- lift . runPersist $
-          selectList [ UserSrsCardTypeUser_id ==. user
-                     , UserSrsCardTypeId <-. (map (toSqlKey . read . fst) newCardTypeNames)] []
         -- For each card type returned, update its name
-        (flip mapM_) card_types $ \(Entity cardTypeId _) ->
+        (flip mapM_) newCardTypeNames $ \(cardTypeIdTxt, newName) ->
           do
-            let maybeNewName = find (\(x,_) -> (toSqlKey . read) x == cardTypeId) newCardTypeNames
-            case maybeNewName of
-              Just (_, newName) -> do
-                lift . runPersist $ update cardTypeId [UserSrsCardTypeName =. cs newName]
-              Nothing -> return ()
+            let cardTypeId = toSqlKey . read $ cardTypeIdTxt
+            _ <- getUserCardType user cardTypeId
+            updateCardTypeName user cardTypeId (cs newName)
 
       case result of
            Left err -> showForm (Just . Left $ err)
@@ -412,9 +290,8 @@ handleNewFactTypeField = method POST addFactField
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
         Entity factTypeId _ <- getUserFactType user (toSqlKey . read . cs $ factTypeIdTxt)
-        fieldCount <- lift . runPersist $ count [UserSrsFactFieldFact_type_id ==. factTypeId]
-        lift . runPersist $
-          insert $ UserSrsFactField user factTypeId (cs $ "Field " ++ show (fieldCount+1))
+        fieldCount <- getFactFieldCount user factTypeId
+        createFactField user factTypeId (cs $ "Field " ++ show (fieldCount+1))
         return factTypeIdTxt
       case result of
         Left err -> handleListFactTypes (Just . Left $ err)
@@ -422,7 +299,7 @@ handleNewFactTypeField = method POST addFactField
 
 handleRemoveFactTypeField :: Handler App (AuthManager App) ()
 handleRemoveFactTypeField = method GET showDeleteForm
-                   <|> method POST deleteFactTypeField
+                   <|> method POST actuallyDeleteFactTypeField
   where
     -- Shows the form for deletion, passing the name and id to the page to verify with the user
     showDeleteForm = do
@@ -441,14 +318,14 @@ handleRemoveFactTypeField = method GET showDeleteForm
                                           ])
                                         (render "delete_fact_field")
     -- Actually deletes the fact type field
-    deleteFactTypeField = do
+    actuallyDeleteFactTypeField = do
       result <- runEitherT $ do
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
         factFieldIdTxt <- getParamE "field_id" "No fact field id specified."
         Entity factFieldId factField <- getUserFactField user (toSqlKey . read . cs $ factFieldIdTxt)
         let factFieldName = userSrsFactFieldName factField
-        lift . runPersist $ delete factFieldId
+        deleteFactField user factFieldId
         return $ (factFieldName, factTypeIdTxt)
       case result of
            Left err   -> handleListFactTypes (Just . Left $ err)
@@ -456,7 +333,7 @@ handleRemoveFactTypeField = method GET showDeleteForm
 
 handleRemoveFactType :: Handler App (AuthManager App) ()
 handleRemoveFactType = method GET showDeleteForm
-                   <|> method POST deleteFactType
+                   <|> method POST actuallyDeleteFactType
   where
     -- Shows the form for deletion, passing the name and id to the page to verify with the user
     showDeleteForm = do
@@ -475,13 +352,13 @@ handleRemoveFactType = method GET showDeleteForm
                                           ])
                                         (render "delete_fact_type")
     -- Actually deletes the fact type
-    deleteFactType = do
+    actuallyDeleteFactType = do
       result <- runEitherT $ do
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "id" "No fact type id specified."
         Entity factTypeId factType <- getUserFactType user (toSqlKey . read . cs $ factTypeIdTxt)
         let factTypeName = userSrsFactTypeName factType
-        lift . runPersist $ delete factTypeId
+        deleteFactType user factTypeId
         return . cs $ factTypeName
       case result of
            Left err   -> handleListFactTypes (Just . Left $ err)
@@ -497,9 +374,8 @@ handleNewCardType = method POST addCardType
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
         Entity factTypeId _ <- getUserFactType user (toSqlKey . read . cs $ factTypeIdTxt)
-        cardTypeCount <- lift . runPersist $ count [UserSrsCardTypeFact_type_id ==. factTypeId]
-        lift . runPersist $
-          insert $ UserSrsCardType user factTypeId (cs $ "Card type " ++ show (cardTypeCount+1)) "${front}" "${back}"
+        cardTypeCount <- getCardTypeCount user factTypeId
+        createCardType user factTypeId (cs $ "Card type " ++ show (cardTypeCount+1))
         return factTypeIdTxt
       case result of
         Left err -> handleListFactTypes (Just . Left $ err)
@@ -510,13 +386,13 @@ handleEditCardType = method GET (renderTemporary "edit_card_type")
 
 handleRemoveCardType :: Handler App (AuthManager App) ()
 handleRemoveCardType = method GET showDeleteForm
-                   <|> method POST deleteCardType
+                   <|> method POST actuallyDeleteCardType
   where
     -- Shows the form for deletion, passing the name and id to the page to verify with the user
     showDeleteForm = do
       result <- runEitherT $ do
         user <- currentUserIdE
-        cardTypeStr <- getParamE "id" "No card type id specified."
+        cardTypeStr <- getParamE "id" "No card tdype id specified."
         Entity cardTypeKey cardType <- getUserCardType user (toSqlKey . read . cs $ cardTypeStr)
         let cardTypeName = userSrsCardTypeName cardType
         let cardTypeId = fromSqlKey cardTypeKey
@@ -529,76 +405,16 @@ handleRemoveCardType = method GET showDeleteForm
                                           ])
                                         (render "delete_card_type")
     -- Actually deletes the card type field
-    deleteCardType = do
+    actuallyDeleteCardType = do
       result <- runEitherT $ do
         user <- currentUserIdE
         factTypeIdTxt <- getParamE "fact_type_id" "No fact type id specified."
         cardTypeIdTxt <- getParamE "id" "No card type id specified."
         Entity cardTypeId cardType <- getUserCardType user (toSqlKey . read . cs $ cardTypeIdTxt)
         let cardTypeName = userSrsCardTypeName cardType
-        lift . runPersist $ delete cardTypeId
+        deleteCardType user cardTypeId
         return $ (cardTypeName, factTypeIdTxt)
       case result of
            Left err          -> handleListFactTypes (Just . Left $ err)
            Right (_, typeId) -> redirect . cs $ "/fact_types/edit/" ++ typeId
 
--- Other
-
-currentUserId :: Handler App (AuthManager App) (Maybe SnapAuthUserId)
-currentUserId = do user <- currentUser
-                   return $ user >>= userDBKey
-
--- Turns 'message' into a splice based on whether it's empty (no message),
--- or whether it contans an error (left) or a success message (right)
--- Builds the splices for listing decks
-messageSplices :: (Monad m, IsString k) => Maybe (Either String String) -> MapSyntax k (HeistT m m Template)
-messageSplices message = case message of
-                            Nothing -> mempty
-                            Just (Left err) -> messageSplice "errors" err
-                            Just (Right msg) -> messageSplice "success" msg
-
-validateDeckName :: Monad m => String -> EitherT String m ()
-validateDeckName str = do require (length str < 16) "Deck name must be less than 16 characters."
-                          require (length str > 0) "Deck name must not be empty."
-
-validateFactTypeName :: Monad m => String -> EitherT String m ()
-validateFactTypeName str = do require (length str < 16) "Fact type name must be less than 16 characters."
-                              require (length str > 0) "Fact type name must not be empty."
-
-getUserDeck :: SnapAuthUserId
-            -> UserSrsDeckId
-            -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsDeck)
-getUserDeck user deckId = (lift . runPersist $ selectList [UserSrsDeckUser_id ==. user,
-                                                           UserSrsDeckId ==. deckId]
-                                                          [LimitTo 1])
-                              >>= (headMay >>> maybeToEitherT "No such deck found.")
-
-getUserFactType :: SnapAuthUserId
-                -> UserSrsFactTypeId
-                -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsFactType)
-getUserFactType user deckId = (lift . runPersist $ selectList [UserSrsFactTypeUser_id ==. user,
-                                                               UserSrsFactTypeId ==. deckId]
-                                                              [LimitTo 1])
-                              >>= (headMay >>> maybeToEitherT "No such fact type found.")
-
-getUserFactField :: SnapAuthUserId
-                -> UserSrsFactFieldId
-                -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsFactField)
-getUserFactField user deckId = (lift . runPersist $ selectList [UserSrsFactFieldUser_id ==. user,
-                                                                UserSrsFactFieldId ==. deckId]
-                                                               [LimitTo 1])
-                              >>= (headMay >>> maybeToEitherT "No such fact field found.")
-
-getUserCardType :: SnapAuthUserId
-                -> UserSrsCardTypeId
-                -> EitherT String (Handler App (AuthManager App)) (Entity UserSrsCardType)
-getUserCardType user deckId = (lift . runPersist $ selectList [UserSrsCardTypeUser_id ==. user,
-                                                                UserSrsCardTypeId ==. deckId]
-                                                               [LimitTo 1])
-                              >>= (headMay >>> maybeToEitherT "No such fact field found.")
-
-getParamE :: String -> String -> EitherT String (Handler App (AuthManager App)) String
-getParamE n s = (lift . getParam $ cs n) >>= maybeToEitherT s >>= return . cs
-
-currentUserIdE :: EitherT String (Handler App (AuthManager App)) SnapAuthUserId
-currentUserIdE = (lift currentUserId) >>= maybeToEitherT "Not logged in."

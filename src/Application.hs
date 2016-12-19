@@ -10,6 +10,9 @@ import Snap.Snaplet
 import Snap.Snaplet.Heist
 import Snap.Snaplet.Auth
 import Snap.Snaplet.Session
+import Database.Persist.Sql (SqlPersistT)
+import Control.Monad.Trans.Resource (ResourceT)
+import Control.Monad.Logger (NoLoggingT)
 import Snap.Snaplet.Persistent
 
 data App = App
@@ -29,3 +32,5 @@ instance HasPersistPool (Handler b App) where
 
 instance HasPersistPool (Handler App (AuthManager App)) where
     getPersistPool = withTop db getPersistPool
+
+type PersistAction a = SqlPersistT (ResourceT (NoLoggingT IO)) a
