@@ -6,3 +6,4 @@ site_key.txt
 snaplets/persist
 snaplets/persist-auth
 **.swp
+**.swm

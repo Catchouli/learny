@@ -42,11 +42,15 @@ module SpacedRepetition.Cards
 , getUserCardTypes
 , getCardTypeCount
 , userSrsCardTypeName
+-- Facts
+, addFact
 )
 where
 
 import Safe                                  ( headMay )
 import Application                           ( App )
+import Data.List                             ( find )
+import Data.Maybe                            ( isNothing )
 import Util                                  ( require, maybeToEitherT )
 import Database.Persist.Sql                  ( selectList, count, get
                                              , insert, delete, update
@@ -118,6 +122,7 @@ UserSrsCardType
   FactCardType fact_type_id name
 UserSrsFact
   user_id SnapAuthUserId
+  fact_type_id UserSrsFactTypeId
 UserSrsFactData
   user_id SnapAuthUserId
   fact_id UserSrsFactId
@@ -413,3 +418,37 @@ getUserCardType user deckId = (lift . runPersist $ selectList [UserSrsCardTypeUs
                                                                 UserSrsCardTypeId ==. deckId]
                                                                [LimitTo 1])
                               >>= (headMay >>> maybeToEitherT "No such card type found.")
+
+
+-- Facts --
+
+-- | Adds a fact of a given fact type with the given fields
+-- All of the fields for the fact type must be specified, use getUserFactFields
+-- to get all of the fields for a particular fact field
+
+addFact :: SnapAuthUserId
+        -> UserSrsFactTypeId
+        -> [(UserSrsFactFieldId, T.Text)]
+        -> CollectionAction (UserSrsFactId, [UserSrsCardId])
+addFact user factType fields = do
+  verifyUserFactTypeAccess user factType
+
+  -- Join the fields to make sure the user has access to them and make sure
+  -- the right fields are specified
+  allFields <- getUserFactFields user factType
+  let fieldExists fieldId = isNothing $ find ((fieldId ==) . entityKey) allFields
+  let fieldsToCreate = filter (fieldExists . fst) fields
+
+  -- Check
+  let fieldError = "Fields mismatch. Check all fields are specified, and no non-existant fields are specified."
+  require (length fields == length allFields && length allFields == length fieldsToCreate) fieldError
+
+  -- Create fact
+  factId <- lift . runPersist $ insert (UserSrsFact user factType)
+
+  -- Create cards
+  cardTypes <- getUserCardTypes user factType
+  cards <- lift . runPersist $ mapM (insert . UserSrsCard user factType . entityKey) cardTypes
+
+  return (factId, cards)
+
